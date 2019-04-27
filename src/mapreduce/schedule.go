@@ -30,5 +30,49 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+	work := make(chan int, ntasks)
+	done := make(chan bool)
+	exit := make(chan bool)
+
+	for i := 0; i < ntasks; i++ {
+		work <- i
+	}
+
+	runTask := func(rpcAddr string) {
+		for taskNumber := range work {
+			fmt.Println("taskNumber", taskNumber)
+			taskArgs := DoTaskArgs{
+				JobName:       jobName,
+				Phase:         phase,
+				TaskNumber:    taskNumber,
+				NumOtherPhase: n_other,
+			}
+			if phase == mapPhase {
+				taskArgs.File = mapFiles[taskNumber]
+			}
+			if call(rpcAddr, "Worker.DoTask", &taskArgs, nil) {
+				done <- true
+			} else {
+				work <- taskNumber
+			}
+		}
+	}
+
+	go func() {
+		for {
+			select {
+			case rpcAddr := <-registerChan:
+				go runTask(rpcAddr)
+			case <-exit:
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < ntasks; i++ {
+		<-done
+	}
+	close(work)
+	exit <- true
 	fmt.Printf("Schedule: %v done\n", phase)
 }
